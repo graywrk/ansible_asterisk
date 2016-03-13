@@ -1,0 +1,9 @@
+download_dir: /tmp
+asterisk_version: 11.21.2
+dahdi_version: 2.11.1+2.11.1
+libpri_version: 1.4.15
+asterisk_user: asterisk
+asterisk_group: asterisk
+asterisk_url_sounds: http://download.asterisk.org/pub/telephony/sounds/asterisk-core-sounds-ru-ulaw-current.tar.gz
+asterisk_path_soundtarball: /usr/src/asterisk_sounds.tar.gz
+asterisk_path_sound: /var/lib/asterisk/sounds/en

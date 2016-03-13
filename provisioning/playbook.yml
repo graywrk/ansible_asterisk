@@ -1,0 +1,170 @@
+---
+- hosts: all
+
+  vars_files:
+  - vars.yml
+
+  pre_tasks:
+    - name: Update apt cache if needed.
+      apt: update_cache=yes cache_valid_time=3600
+
+  handlers:
+    - name: restart asterisk
+      service: name=asterisk state=restarted
+  handlers:
+    - name: start asterisk
+      service: name=asterisk stare=started
+
+  tasks:
+    - name: Install dependencies
+      apt: "name={{ item }} state=present"
+      with_items:
+        - libncurses5-dev
+        - libssl-dev
+        - libxml2-dev
+        - libsqlite3-dev
+        - libmysqlclient15-dev
+        - curl
+        - mpg123
+        - libxml2
+        - libxml2-dev
+        - libaudiofile-dev
+        - subversion
+        - git
+        - libiksemel-dev
+        - libssl-dev
+        - unzip
+        - automake
+        - autoconf
+        - g++
+
+    - name: Install linux linux-headers
+      action: shell apt-get install -y linux-headers-$(uname -r)
+      ignore_errors: True
+
+    - name: Download dahdi
+      get_url:
+        url: "http://downloads.asterisk.org/pub/telephony/dahdi-linux-complete/dahdi-linux-complete-{{ dahdi_version }}"
+        dest: "{{ download_dir }}/dahdi-linux-complete.tar.gz"
+
+    - name: Expand dahdi
+      unarchive: src="{{ download_dir }}/dahdi-linux-complete.tar.gz" dest="{{ download_dir }}" copy=no
+
+    - name: Install dahdi
+      command: "{{ item }}"
+      args:
+        chdir: "{{ download_dir }}/dahdi-linux-complete-{{ dahdi_version }}"
+      sudo: true
+      with_items:
+        - make all
+        - make config
+        - make install
+
+    - name: Download libpri
+      get_url:
+        url: "http://downloads.asterisk.org/pub/telephony/libpri/libpri-{{ libpri_version }}.tar.gz"
+        dest: "{{ download_dir }}/libpri.tar.gz"
+
+    - name: Expand libpri
+      unarchive: src="{{ download_dir }}/libpri.tar.gz" dest="{{ download_dir }}" copy=no
+
+    - name: Install libpri
+      command: "{{ item }}"
+      args:
+        chdir: "{{ download_dir }}/libpri-{{ libpri_version }}"
+      with_items:
+        - make all
+        - make install
+      sudo: true
+
+    - name: Download asterisk
+      get_url:
+        url: "http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-{{ asterisk_version }}.tar.gz"
+        dest: "{{ download_dir }}/asterisk.tar.gz"
+
+    - name: Expand asterisk
+      unarchive: src="{{ download_dir }}/asterisk.tar.gz" dest="{{ download_dir }}" copy=no
+
+    - name: Compile and install asterisk
+      command: "{{ item }}"
+      args:
+        chdir: "{{ download_dir }}/asterisk-{{ asterisk_version }}"
+      with_items:
+        - ./configure --libdir=/usr/lib64
+        - make menuselect.makeopts
+          # - sed -i -e 's/res_snmp//' menuselect.makeopts
+        - sed -i -e 's/chan_sip//' menuselect.makeopts
+        - sed -i -e 's/res_http_websocket//' menuselect.makeopts
+        - make
+        - contrib/scripts/get_mp3_source.sh
+        - make uninstall
+        - make install
+        - make config
+      sudo: true
+
+    - name: Checkout asterisk-chan-dongle
+      git: repo="https://github.com/graywrk/asterisk-chan-dongle" dest="{{ download_dir }}"
+
+    - name: Compile and install chan_dongle
+      command: "{{ item }}"
+      args:
+        chdir: "{{ download_dir }}/asterisk-chan-dongle"
+      with_items:
+        - aclocal
+        - autoconf
+        - automake -a
+        - ./configure
+        - make
+        - make install
+        - service asterisk restart
+      sudo: true
+
+    - name: Create asterisk group
+      group: name="{{ asterisk_group }}" state=present
+
+    - name: Add asterisk user
+      user: name="{{ asterisk_user }}" comment="Asterisk process user" shell=/sbin/nologin group="{{ asterisk_group }}"
+
+    - name: Check config backup
+      stat: path=/etc/asterisk/original.asterisk.conf
+      register: asterisk_backup_file
+
+    - name: Make backup for asterisk.conf
+      shell: rsync -ci /etc/asterisk/asterisk.conf /etc/asterisk/original.asterisk.conf
+      register: rsync_result
+      changed_when: "rsync_result.stdout != ''"
+
+    - name: Modify asterisk.conf to strip remarks
+      command: 'sed -i -e "/^\s*;/d" /etc/asterisk/asterisk.conf'
+
+    - name: Set INI options in asterisk.conf to reflect asterisk user change
+      ini_file:
+        dest: "/etc/asterisk/asterisk.conf"
+        section: "{{ item.section }}"
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+      with_items:
+        - { section: "files", option: "astctlpermissions", value: "0775" }
+        - { section: "files", option: "astctlowner", value: 'astctlowner = {{ asterisk_user }}' }
+        - { section: "files", option: "astctlgroup", value: 'astctlgroup = {{ asterisk_group }}' }
+        - { section: "files", option: "astctl", value: 'astctl = asterisk.ctl' }
+        - { section: "options", option: "runuser", value: '{{ asterisk_user }}' }
+        - { section: "options", option: "rungroup", value: '{{ asterisk_group }}' }
+
+    - name: Set ownership on important directories for asterisk user
+      file: "path={{ item.path }} owner={{ asterisk_user }} group={{ asterisk_group }} recurse=yes"
+      with_items:
+        - { path: '/usr/lib64/asterisk/' }
+        - { path: '/var/lib/asterisk/' }
+        - { path: '/var/spool/asterisk/' }
+        - { path: '/var/log/asterisk/' }
+        - { path: '/var/run/asterisk/' }
+
+    - name: Set ownership on important files for asterisk user
+      file: "path={{ item.path }} owner={{ asterisk_user }} group={{ asterisk_group }}"
+      with_items:
+        - { path: '/usr/sbin/asterisk' }
+
+    - name: Make temp pjproject dir
+      file: "path=/tmp/pjproject state=directory"
+
