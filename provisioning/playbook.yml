@@ -103,7 +103,7 @@
       sudo: true
 
     - name: Checkout asterisk-chan-dongle
-      git: repo="https://github.com/graywrk/asterisk-chan-dongle" dest="{{ download_dir }}"
+    git: repo="https://github.com/graywrk/asterisk-chan-dongle" dest="{{ download_dir }}/asterisk-chan-dongle"
 
     - name: Compile and install chan_dongle
       command: "{{ item }}"
